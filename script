@@ -1,0 +1,257 @@
+#!/usr/bin/bash
+
+#Joe Tucker
+
+# sendemail -f fromEmail -t toEmail -u Subject -s server -m message -v -o message-charset=utf-8 
+# just pipe ndiff output into this to send as email , if that causes problems save ndiff output as a variable or even a file and send in message
+
+scan1=("111.111.11.11")
+scan2=("222.222.22.22")
+scan3=("333.333.33.33")
+scan4=("444.444.44.44")
+
+# a directory will have to be made to store the .xlsx files and maintain history, in script its referenced as allScans
+
+#The purpose of this script is to automate address list upkeep. It lists active hosts, as well as the ports open on that host with equivalent service information.
+#It compares the results of the previous script run with the current runtime, and sends the difference between the two out in an email to a specified location.
+#The network information that is output as a result of the nmap scan is formatted in a human readable way and uploaded directly to a matching google drive account in
+# spreadsheet format.
+#Upon executing the script, users are allowed to choose which ports they want to scan as well as the speed at which they want it to be scanned. Leaving either field blank
+# on runtime will cause that network to be skipped in the script, thus it will not be scanned.
+
+# script runs with matching gdrive file in same directory for upload
+# as it is now , configured for scans on at most four networks , user can decide how many they want to scan by leaving appropriate fields blank on runtime
+# if a user wants to check progress of a scan running in a tmux session without interrupting it , use a different screen with access to the same
+#       directory and run ls command in the directory that the Latest files output to , the 3 main file types of the current scan will be there because
+#       the scan hasnt finished yet , and thus the other two types of files havent been deleted
+# for system integration , user will have to go in and change IP of scans , match their own gdrive to system , and update text of user query
+
+# if someone wanted to put the scans into background processes , they would have to move the upload and ndiff commands to the end, and assign a variable to the scan itself
+#       then , have a conditional check if the variable exists and put the commands in that so the commands arent run on a scan that hasnt finished or on a scan that didnt occur
+
+# when opened in google drive , file columns will have to be resized manually , just select all and resize to fit data , should take ten seconds
+
+#saving most recent network scans as variables so they can be compared to current scan. this is necessary because the scan overwrites the old ones being referenced here
+#putting them in conditionals for first runs on a system , so it causes no error when they try to absorb files that dont exist
+
+if [[ -s firstLatest.xml ]]
+then
+	oldFirst=$(<firstLatest.xml)
+fi
+
+if [[ -s secondLatest.xml ]]
+then
+	oldSecond=$(<secondLatest.xml)
+fi
+
+if [[ -s thirdLatest.xml ]]
+then
+	oldThird=$(<thirdLatest.xml)
+fi
+
+if [[ -s fourthLatest.xml ]]
+then
+	oldFourth=$(<fourthLatest.xml)
+fi
+
+#this is the chosen naming sense, because it portrays information as well as changes daily, so files wont overwrite previous scans in the allScans directory
+#if upload is configured, multiple scans in the same day will still be sent to gdrive, but they will overwrite eachother in both Latest and allScans directory as they share name
+todaysDate=$(date '+%Y-%m-%d')
+
+
+#prompting user for port and scan information
+printf "Enter port numbers of First scan with format \"1-2,3\" or enter \"-p-\" for all ports. Following a space, enter the speed at which first scan should run with format \"T(1-5)\". \nIf you leave one or both fields blank, this network will not be scanned. Ex:   22,80,5901 T3\n"
+read  ports1 speed1
+
+#this is necessary to regulate syntax of command, so listing ports or choosing to select all ports is relevant
+area1="-p  $ports1"
+
+if [[ "$ports1" = "-p-" ]]
+then
+	area1="-p-"
+fi
+
+
+printf "Enter port numbers of Second scan with format \"1-2,3\" or enter \"-p-\" for all ports. Following a space, enter the speed at which the Second scan should run with format\"T(1-5)\".\nIf you leave one or both fields blank, this network will not be scanned.\n"
+read ports2 speed2
+
+area2="-p  $ports2"
+
+if [[ "$ports2" = "-p-" ]]
+then
+	area2="-p-"
+fi
+
+
+printf "Enter port numbers of Third scan with format \"1-2,3\" or enter \"-p-\" for all ports. Following a space, enter the speed at which the Second scan should run with format\"T(1-5)\".\nIf you leave one or both fields blank, this network will not be scanned.\n"
+read ports3 speed3
+
+area3="-p  $ports3"
+
+if [[ "$ports3" = "-p-" ]]
+then
+	area3="-p-"
+fi
+
+
+printf "Enter port numbers of Fourth scan with format \"1-2,3\" or enter \"-p-\" for all ports. Following a space, enter the speed at which the Second scan should run with format\"T(1-5)\".\nIf you leave one or both fields blank, this network will not be scanned.\n"
+read ports4 speed4
+
+area4="-p  $ports4"
+
+if [[ "$ports4" = "-p-" ]]
+then
+	area4="-p-"
+fi
+
+#if either input option is left empty, that network will not be scanned. also blocks most cases of bad input or typos
+# this secures input in such a way that characters unrelated to the desired options cant be used. only lowercase p and uppercase T are allowed in the specific order
+if [[ $ports1 != "" && $speed1 != "" && $ports1 != [a-oq-zA-Z] && $speed1 != [A-SU-Za-z] ]]
+then
+
+# was originally using greppable output -oG and using file type .xlsx , switched to -oA . this outputs as the three major files types .xml .nmap .gnmap
+#the nmap file type is unnecesary and basically unreadable , so that file is removed with no action. the xml file is necessary for the ndiff command , which far exceeds the
+# diff command using .xlsx files in terms of human readability and efficiency . this is because ive formatted the output to list host information on a single line ,
+# so any difference in a single character on one scan to another print out the entire line , which can be hundreds of characters long . the ndiff command is specifically
+# for finding differences between nmap scans . Unlike using -oG , -oA doesnt allow the user to pipe the command into formatting , as its outputting three files and cant
+# differentiate which file to format or not . The formatting and piping into a file is what kept the output of the scan from being sent to user terminal , but this is stopped
+# by absorbing the scan into a trash variable , which does nothing . Where before I could directly format the output of the scan , I now have to single out the
+# .gnmap file seperately and format it , sending it into the allScans directory to hold history. the .xml file is also sent to a variable , this is so there arent
+# any problems or differences when running ndiff, because its using the variables at the beginning. Basically , im just turning the .xml file into an xml variable to maintain
+# continuity. the .gnmap is turned into an xlsx file in formatting because thats the only known file type that cleanly transitions into google drive without making a copy
+# of itself , thus reducing redundancy . get rid of the gnmap also after its been formatted and copied into an .xlsx for upload, reducing clutter
+#the results of the scan are sent to a directory that houses all past scans, as well as a single file to be overwritten by the most recent scan
+#rm commands look as such because they request and require a y from user
+
+# tested with creating scans as background processes
+
+	 firstTrash=$(nmap $area1 -sV -Pn -$speed1 -oA firstLatest $scan1)
+
+	 currentFirst=$(<firstLatest.xml)
+
+	 cat firstLatest.gnmap | grep Port | cut -f 1,2 | cut -c 7- | awk '{$3=""; print $0}' | tr -d , | sed 's_\s\s_,_g' | sed 's_/open/tcp__g' | sed 's_/_,_g' | sed 's_,,_/_g' | sed 's_,closed,_/closed/_g' > allScans/first$todaysDate.xlsx
+
+	 ndiff <(echo "$oldFirst") <(echo "$currentFirst")
+
+	 #./gdrive upload /fileLocation/allScans/first$todaysDate.xlsx
+
+	 yes | rm firstLatest.nmap
+	 yes | rm firstLatest.gnmap
+fi
+
+
+if [[ $ports2 != "" && $speed2 != "" && $ports2 != [a-oq-zA-Z] && $speed2 != [A-SU-Za-z] ]]
+then
+
+	 currentSecond=$(nmap $area2 -sV -Pn -$speed2 -oA secondLatest $scan2)
+	 cat secondLatest.gnmap | grep Port | cut -f 1,2 | cut -c 7- | awk '{$3=""; print $0}' | tr -d , | sed 's_\s\s_,_g' | sed 's_/open/tcp__g' | sed 's_/_,_g' | sed 's_,,_/_g' | sed 's_,closed,_/closed/_g' > allScans/second$todaysDate.xlsx
+
+	 #ndiff <(echo "$oldSecond") <(echo "$currentSecond")
+
+	 #./gdrive upload /fileLocation/allScans/second$todaysDate.xlsx
+
+	 yes | rm secondLatest.nmap
+	 yes | rm secondLatest.gnmap
+fi
+
+
+
+if [[ $ports3 != "" && $speed3 != "" && $ports3 != [a-oq-zA-Z] && $speed3 != [A-SU-Za-z] ]]
+then
+
+	 currentthird=$(nmap $area3 -sV -Pn -$speed3 -oA thirdLatest $scan3)
+	 cat thirdLatest.gnmap | grep Port | cut -f 1,2 | cut -c 7- | awk '{$3=""; print $0}' | tr -d , | sed 's_\s\s_,_g' | sed 's_/open/tcp__g' | sed 's_/_,_g' | sed 's_,,_/_g' | sed 's_,closed,_/closed/_g' > allScans/third$todaysDate.xlsx 
+
+
+	 #ndiff <(echo "$oldThird") <(echo "$currentThird")
+
+	 #./gdrive upload /fileLocation/allScans/third$todaysDate.xlsx
+
+	 yes | rm thirdLatest.nmap
+	 yes | rm thirdLatest.gnmap
+fi
+
+
+
+if [[ $ports4 != "" && $speed4 != "" && $ports4 != [a-oq-zA-Z] && $speed4 != [A-SU-Za-z] ]]
+then
+
+	 currentFourth=$(nmap $area4 -sV -Pn -$speed4 -oA fourthLatest $scan4)
+	 cat fourthLatest.gnmap | grep Port | cut -f 1,2 | cut -c 7- | awk '{$3=""; print $0}' | tr -d , | sed 's_\s\s_,_g' | sed 's_/open/tcp__g' | sed 's_/_,_g' | sed 's_,,_/_g' | sed 's_,closed,_/closed/_g' > allScans/fourth$todaysDate.xlsx
+
+	 #ndiff <(echo "$oldFourth") <(echo "$currentFourth")
+
+	 #./gdrive upload /fileLocation/allScans/fourth$todaysDate.xlsx
+
+	 yes | rm fourthLatest.nmap
+	 yes | rm fourthLatest.gnmap
+fi
+
+#make loop that waits for each newly touched file, that only allows passage after it recieves each one.
+#need to put if statements and configure is so that scans that arent done arent included in the sleep timer
+#take out echo statements, just for test purposes
+
+
+
+#checks to make sure the scans associated variable exists, then waits for the return of that scan to allow movement down the script
+#seems to slow down the scans considerably?
+#implemented so I can get the two middle scans to become background processes to decrease run time
+
+
+#if [[ -v currentfirst ]]
+#then 
+#	while ! test -e firstDone; do
+#		sleep 3
+#		echo "still waiting"
+#	done
+#rm firstDone
+#
+#diff --color <(echo "$oldfirst") <(echo "$currentfirst")
+#
+#fi
+
+
+
+#if [[ -v currentsecond ]]
+#then 
+#	while ! test -e secondDone; do
+#		sleep 3
+#		echo "still waiting"
+#	done
+#rm secondDone
+#
+#diff --color <(echo "$oldsecond") <(echo "$currentsecond")
+#
+#fi
+
+
+#if [[ -v currentthird ]]
+#then 
+#	while ! test -e thirdDone; do
+#		sleep 3
+#		echo "still waiting"
+#	done
+#rm thirdDone
+#
+#diff --color <(echo "$oldthird") <(echo "$currentthird")
+#
+#fi
+
+
+#if [[ -v currentfourth ]]
+#then 
+#	while ! test -e fourthDone; do
+#		sleep 3
+#		echo "still waiting"
+#	done
+#rm fourthDone
+#
+#diff --color <(echo "$oldfourth") <(echo "$currentfourth")
+#
+#fi
+
+
+
+#example of what a scan with background processes will need to look like, removing touch from end of others because background processes arent deemed necessary
+#currentthird=$(nmap $area3 -A -sV -Pn -$speed3 -oG - inputIP | grep Port | cut -f 1,2 | cut -c 7- | awk '{$3=""; print $0}' | tr -d , | sed 's_\s\s_,_g' | sed 's_/open/tcp__g' | sed 's_/_,_g' | sed 's_,,_/_g' | sed 's_,closed,_/closed/_g' | tee  thirdLatest.xlsx allScans/location.xlsx) && touch thirdDone
+
